@@ -233,9 +233,8 @@ class train():
         self.loss_list = None
 
     def get_batches(self, key):
-        t_start, t_end, t_spacing = self.time_range
         first_usable_t_idx = self.time_delay*(self.time_delay_dim-1) # the first point that can be used for training is the time_delay*(time_delay_dim-1)^th point.
-        n_points = int((t_end-t_start)/t_spacing) - first_usable_t_idx - 1 # -1 because the prediction always needs the data at the next time step
+        n_points = len(self.voltage_list) - first_usable_t_idx - 1 # -1 because the prediction always needs the data at the next time step
         tmp_v = jnp.array([jnp.roll(self.voltage_list, -i*self.time_delay) for i in range(self.time_delay_dim)]).T
         tmp_v = tmp_v[:-1-first_usable_t_idx, :]
         tmp_pred_v = self.voltage_list[first_usable_t_idx+1:].reshape((-1, 1))
@@ -297,9 +296,8 @@ class train_with_current():
         self.loss_list = None
 
     def get_batches(self, key):
-        t_start, t_end, t_spacing = self.time_range
         first_usable_t_idx = self.time_delay*(self.time_delay_dim-1) # the first point that can be used for training is the time_delay*(time_delay_dim-1)^th point.
-        n_points = int((t_end-t_start)/t_spacing) - first_usable_t_idx - 1 # -1 because the prediction always needs the data at the next time step
+        n_points = len(self.voltage_list) - first_usable_t_idx - 1 # -1 because the prediction always needs the data at the next time step
         tmp_v = jnp.array([jnp.roll(self.voltage_list, -i*self.time_delay) for i in range(self.time_delay_dim)]).T
         tmp_v = tmp_v[:-1-first_usable_t_idx, :]
 
@@ -367,9 +365,8 @@ class train_with_current_multi_prediction():
         self.loss_list = None
 
     def get_batches(self, key):
-        t_start, t_end, t_spacing = self.time_range
         first_usable_t_idx = self.time_delay*(self.time_delay_dim-1) # the first point that can be used for training is the time_delay*(time_delay_dim-1)^th point.
-        n_points = int((t_end-t_start)/t_spacing) - first_usable_t_idx - self.n_prediction_steps 
+        n_points = len(self.voltage_list) - first_usable_t_idx - self.n_prediction_steps 
 
         tmp_v = jnp.array([self.voltage_list[t: t+first_usable_t_idx+self.n_prediction_steps+1] for t in range(n_points)])
 

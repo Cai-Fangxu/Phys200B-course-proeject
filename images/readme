@@ -1,0 +1,11 @@
+1.png, 2.png
+1000 RBF centers; 5 nearest neighbors for finding sigmas; 
+stimulus for training: Lorenz1963 (time range=(0, 600, 0.02)) + customized plateaus from -10 to +15 nA (time range=(0, 600, 0.02)). (the first 4500 points are dropped)
+time delay = 10h
+time delay dimension = 10
+beta = 0.01
+The training set and the test set are the same. The prediction starts at the 1200th point and last 25000 points. 
+
+3.png, 4.png
+same conditions as the previous one. 
+The training set and the test set are the same. The prediction starts at the 26200th point and last 10000 points. 
