@@ -8,6 +8,7 @@ from typing import Sequence
 from functools import partial
 from tqdm import tqdm
 import optax
+import sklearn
 
 class stimulus_base_class():
     def __init__(self, time_range, initial_state=None, time_constant=10, rescale_factor=1, dc_stimulus=0) -> None:
@@ -209,6 +210,46 @@ class prediction_model_with_current(nn.Module):
         temp = temp.reshape(temp.shape[:-1]) # change shape from (..., 1) to (...)
         # return V + (temp + self.membrane_c_inverse*avg_current - self.membrane_leak*V)*self.time_spacing
         return Vt + (temp + It)*self.time_spacing
+
+class train_by_regression():
+    """training by doing linear/ridge regression"""
+    def __init__(self, centers, voltage_list, current_list, time_delay, time_delay_dim, time_spacing, beta, R, membrane_capacitance=1) -> None:
+        self.centers = centers # (n_centers, time_delay_dim)
+        self.voltage_list = voltage_list
+        self.current_list = current_list
+        self.time_delay = time_delay
+        self.time_delay_dim = time_delay_dim
+        self.time_spacing = time_spacing
+        self.beta = beta
+        self.R = R # R = 1/sigma^2
+        self.membrane_capacitance = membrane_capacitance
+        self.X = None
+        self.Y = None
+
+        self._pre_processing()
+
+    def _pre_processing(self):
+        first_usable_t_idx = self.time_delay*(self.time_delay_dim-1) # the first point that can be used for training is the time_delay*(time_delay_dim-1)^th point.
+        tmp_v = jnp.array([jnp.roll(self.voltage_list, -i*self.time_delay) for i in range(self.time_delay_dim)]).T
+        tmp_v = tmp_v[:-1-first_usable_t_idx, :]
+
+        def get_distances_to_centers(x):
+            diff = self.centers - x
+            dist = jnp.exp(-np.sum(diff**2, axis=-1)*self.R/2)
+            return dist
+
+        self.X = jax.vmap(get_distances_to_centers, in_axes=0)(tmp_v)
+           
+        tmp_delta_v = self.voltage_list[first_usable_t_idx+1:] - self.voltage_list[first_usable_t_idx:-1]
+        tmp_i = (self.current_list + jnp.roll(self.current_list, -1))/2
+        tmp_i = tmp_i[first_usable_t_idx:-1]
+        self.Y = tmp_delta_v/self.time_spacing - tmp_i/self.membrane_capacitance
+
+    def get_weights(self):
+        ridge = sklearn.linear_model.Ridge(alpha=self.beta, fit_intercept=False)
+        self.ridge = ridge.fit(self.X, self.Y)
+        self.score = ridge.score(self.X, self.Y)
+        return ridge.coef_
 
 class train():
     def __init__(self, 
@@ -538,4 +579,32 @@ class generate_prediction_with_current():
             avg_is = jnp.array(self.avg_i[state_indices])
             next_v = self.model.apply(params, vs, avg_is)
             self.prediction_list[i+initial_piece_len] = next_v
+            state_indices = state_indices + 1
+
+class generate_batch_prediction_with_current():
+    def __init__(self, model: prediction_model_with_current, time_delay:int, time_delay_dim: int, batch_stimulus_list: Sequence[float], batch_initial_piece: Sequence[float]) -> None:
+        """
+        the initial_piece should be a sequence of voltages from (t0 - time_delay*(time_delay_dim-1)) to t0. (the length of this sequence is time_delay*(time_delay_dim-1)+1)
+        the stimulus list should also starts at (t0 - time_delay*(time_delay_dim-1))
+        """
+        self.model = model
+        self.time_delay, self.time_delay_dim = time_delay, time_delay_dim
+        self.batch_avg_i = ((batch_stimulus_list + jnp.roll(batch_stimulus_list, -1, axis=-1))/2)[..., :-1]
+        self.batch_initial_piece = batch_initial_piece
+        prediction_list_shape = list(self.batch_avg_i.shape)
+        prediction_list_shape[-1] += 1
+        self.prediction_list = np.zeros(prediction_list_shape)
+        self.prediction_list[..., :batch_initial_piece.shape[-1]] = batch_initial_piece
+
+    def run(self, params, n_steps=None):
+        # initial_piece_len = self.time_delay*(self.time_delay_dim-1)+1
+        initial_piece_len = self.batch_initial_piece.shape[-1]
+        state_indices = np.array([n*self.time_delay for n in range(self.time_delay_dim)]) 
+        if n_steps is not None:
+            n_steps = min(n_steps, self.prediction_list.shape[-1] - initial_piece_len)
+        for i in tqdm(range(n_steps)):
+            vs = jnp.array(self.prediction_list[..., state_indices])
+            avg_is = jnp.array(self.batch_avg_i[..., state_indices])
+            next_v = self.model.apply(params, vs, avg_is)
+            self.prediction_list[..., i+initial_piece_len] = next_v
             state_indices = state_indices + 1
