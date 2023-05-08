@@ -60,6 +60,25 @@ class lorenz1963_stimulus(stimulus_base_class):
         self.sol = self.rescale_factor*odeint(self.dfdt, self.initial_state, np.arange(*self.time_range))
         self.stimulus_list = self.sol[:, 0] + self.dc_stimulus
 
+class colpitts_stimulus(stimulus_base_class):
+    def __init__(self, time_range, initial_state=[0.1, 0.1, 0.1], alpha:float=5, gamma:float=0.0797, eta:float=6.273 ,q:float=0.6898, time_constant=10, rescale_factor=1, dc_stimulus=0) -> None:
+        super().__init__(time_range, initial_state, time_constant, rescale_factor, dc_stimulus)
+        self.alpha = alpha
+        self.gamma = gamma
+        self.eta = eta
+        self.q = q
+    
+    def dfdt(self, state, t):
+        x1, x2, x3 = state[0], state[1], state[2]
+        dx1dt = self.alpha*x2/self.time_constant
+        dx2dt = (-self.gamma*(x1+x3)-self.q*x2)/self.time_constant
+        dx3dt = self.eta*(x2+1-np.exp(-x1))/self.time_constant
+        return [dx1dt, dx2dt, dx3dt]
+
+    def get_stimulus_list(self, variable_idx=0):
+        self.sol = self.rescale_factor*odeint(self.dfdt, self.initial_state, np.arange(*self.time_range))
+        self.stimulus_list = self.sol[:, variable_idx] + self.dc_stimulus
+
 class constant_stimulus(stimulus_base_class):
     def __init__(self, dc_stimulus, time_range, time_constant=10) -> None:
         super().__init__(time_range, None, time_constant)
@@ -250,6 +269,28 @@ class train_by_regression():
         self.ridge = ridge.fit(self.X, self.Y)
         self.score = ridge.score(self.X, self.Y)
         return ridge.coef_
+
+class train_by_regression_leak(train_by_regression):
+    """training by doing linear/ridge regression, with leak terms built in"""
+
+    def _pre_processing(self):
+        first_usable_t_idx = self.time_delay*(self.time_delay_dim-1) # the first point that can be used for training is the time_delay*(time_delay_dim-1)^th point.
+        tmp_v = jnp.array([jnp.roll(self.voltage_list, -i*self.time_delay) for i in range(self.time_delay_dim)]).T
+        tmp_v = tmp_v[:-1-first_usable_t_idx, :]
+
+        def get_distances_to_centers(x):
+            diff = self.centers - x
+            dist = jnp.exp(-np.sum(diff**2, axis=-1)*self.R/2)
+            dist = jnp.concatenate((dist, jnp.array([1., x[-1]])))
+            return dist
+
+        self.X = jax.vmap(get_distances_to_centers, in_axes=0)(tmp_v)
+           
+        tmp_delta_v = self.voltage_list[first_usable_t_idx+1:] - self.voltage_list[first_usable_t_idx:-1]
+        tmp_i = (self.current_list + jnp.roll(self.current_list, -1))/2
+        tmp_i = tmp_i[first_usable_t_idx:-1]
+        self.Y = tmp_delta_v/self.time_spacing - tmp_i/self.membrane_capacitance
+
 
 class train():
     def __init__(self, 
