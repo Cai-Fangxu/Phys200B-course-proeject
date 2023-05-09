@@ -79,6 +79,26 @@ class colpitts_stimulus(stimulus_base_class):
         self.sol = self.rescale_factor*odeint(self.dfdt, self.initial_state, np.arange(*self.time_range))
         self.stimulus_list = self.sol[:, variable_idx] + self.dc_stimulus
 
+class sinusodials_stimulus(stimulus_base_class):
+    def __init__(self, time_range, amplitude, periods, coeffs, phases, dc_stimulus=0) -> None:
+        """amplitude: the overall amplitude of the stimulus
+        periods: a list of periods for sinusodial waves, the unit is ms"""
+        super().__init__(time_range, initial_state=None, time_constant=1, rescale_factor=1, dc_stimulus=dc_stimulus)
+        self.amplitude = amplitude
+        self.periods = periods
+        self.coeffs = coeffs
+        self.phases = phases
+        self.get_stimulus_list()
+
+    def get_stimulus_list(self):
+        times = np.arange(*self.time_range)
+        sums = np.zeros(times.shape)
+        for i in range(len(self.periods)):
+            sums += self.coeffs[i]*np.sin(2*np.pi/self.periods[i]*times + self.phases[i])
+        max_amp = np.max(np.abs(sums))
+        sums = self.amplitude/max_amp*sums
+        self.stimulus_list = sums + self.dc_stimulus
+
 class constant_stimulus(stimulus_base_class):
     def __init__(self, dc_stimulus, time_range, time_constant=10) -> None:
         super().__init__(time_range, None, time_constant)
